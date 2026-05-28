@@ -31,7 +31,11 @@ yarn-error.*
 *.pem
 
 # local env files
+.env
 .env*.local
+
+# Claude Code workspace config (personal, not project)
+.claude/
 
 # typescript
 *.tsbuildinfo

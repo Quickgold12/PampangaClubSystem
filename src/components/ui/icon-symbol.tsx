@@ -18,6 +18,11 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
+  // Added for the Clubs / Requests tabs:
+  'person.3.fill': 'groups',
+  'tray.full.fill': 'inbox',
+  // Calendar tab:
+  'calendar': 'event',
 } as IconMapping;
 
 /**

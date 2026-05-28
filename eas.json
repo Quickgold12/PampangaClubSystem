@@ -1,0 +1,33 @@
+{
+  "//": "EAS Build configuration. See https://docs.expo.dev/build/eas-json/",
+  "cli": {
+    "version": ">= 5.9.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "//": "development — a dev client build. Install this on your phone, then run `npx expo start --dev-client`. This is the build that enables expo-notifications (and any other native module Expo Go can't run). Produces a sideloadable APK on Android.",
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+
+    "//preview": "preview — a release-mode build for sharing/testing without the dev client. Also an installable APK.",
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      }
+    },
+
+    "//production": "production — store-ready build (Android App Bundle for Google Play).",
+    "production": {
+      "autoIncrement": true
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
