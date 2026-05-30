@@ -268,8 +268,12 @@ export const getPendingForReviewer = async (
 // ── Officer / adviser: approve ──────────────────────────────────────────────
 // Two writes in sequence (Supabase JS doesn't expose transactions):
 //   1. Flip the request to 'approved'.
-//   2. Insert the corresponding membership row as a regular 'member'.
-// If step 2 fails we revert step 1 so the request doesn't get stuck.
+//   2. Look up the joiner's app-wide role. If they signed up as a "Club
+//      Officer", they're auto-granted officer status in this club. Otherwise
+//      they join as a regular member. Advisers/faculty don't go through this
+//      flow (they're set directly on the org row).
+//   3. Insert the corresponding membership row.
+// If step 3 fails we revert step 1 so the request doesn't get stuck.
 export const approveRequest = async (
   requestId: string,
   reviewerId: string
@@ -291,9 +295,20 @@ export const approveRequest = async (
 
   if (updateError) return fail(updateError.message)
 
+  // Auto-elevate to 'officer' if the joiner's app-wide role is 'club_officer'.
+  // This saves the adviser from manually promoting every officer signup —
+  // their role choice at signup carries through to the membership.
+  const { data: userProfile } = await supabase
+    .from('users')
+    .select('role')
+    .eq('id', req.user_id)
+    .maybeSingle()
+  const memberRole: 'officer' | 'member' =
+    userProfile?.role === 'club_officer' ? 'officer' : 'member'
+
   const { error: membershipError } = await supabase
     .from('memberships')
-    .insert({ user_id: req.user_id, organization_id: req.organization_id, role_in_club: 'member' })
+    .insert({ user_id: req.user_id, organization_id: req.organization_id, role_in_club: memberRole })
 
   if (membershipError) {
     // Roll back the status flip so a future approve attempt can retry.
@@ -322,6 +337,45 @@ export const rejectRequest = async (
 
   if (error) return fail(error.message)
   return ok(true)
+}
+
+// ── Per-user membership map (powers the per-club badge on the Clubs list) ──
+// Returns Map<organization_id, 'officer' | 'member'> so the Clubs screen can
+// stamp each card with the user's role in THAT club at a glance — much
+// clearer than tapping into every card to find out.
+export const listMyMembershipMap = async (
+  userId: string
+): Promise<Result<Map<string, 'officer' | 'member'>>> => {
+  const { data, error } = await supabase
+    .from('memberships')
+    .select('organization_id, role_in_club')
+    .eq('user_id', userId)
+
+  if (error) return fail(error.message)
+
+  const map = new Map<string, 'officer' | 'member'>()
+  for (const m of data ?? []) {
+    map.set(m.organization_id, m.role_in_club as 'officer' | 'member')
+  }
+  return ok(map)
+}
+
+// ── Adviser dashboard: "Clubs You Advise" strip ────────────────────────────
+// Returns the clubs where the user is the named adviser OR faculty
+// coordinator. Used by the home dashboard so an adviser sees their own clubs
+// front-and-center and can jump straight in with one tap.
+export const listAdviserClubs = async (
+  userId: string
+): Promise<Result<Array<Pick<Organization, 'id' | 'name'>>>> => {
+  const { data, error } = await supabase
+    .from('organizations')
+    .select('id, name')
+    // Postgrest .or() takes a comma-separated string of conditions.
+    .or(`adviser_id.eq.${userId},faculty_coordinator_id.eq.${userId}`)
+    .order('name', { ascending: true })
+
+  if (error) return fail(error.message)
+  return ok((data ?? []) as Array<Pick<Organization, 'id' | 'name'>>)
 }
 
 // ── Officer dashboard: "Your Officer Clubs" strip ──────────────────────────

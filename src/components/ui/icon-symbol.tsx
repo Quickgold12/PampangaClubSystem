@@ -23,6 +23,8 @@ const MAPPING = {
   'tray.full.fill': 'inbox',
   // Calendar tab:
   'calendar': 'event',
+  // Chat tab:
+  'bubble.left.fill': 'chat-bubble',
 } as IconMapping;
 
 /**

@@ -279,10 +279,52 @@ export type ReportFeedItem = ReportWithPeople & {
   organization: Pick<Organization, 'id' | 'name'>
 }
 
-export type Message = {
+// ── Club chat (group chat per organization) ──────────────────────────────────
+// Schema: supabase/schema_v18.sql. Every member can post; deletes are allowed
+// for the author OR any officer/adviser of the club.
+export type ClubMessage = {
   id: string
   organization_id: string
-  sender_id: string
-  content: string
-  sent_at: string
+  // null when the author's auth row was deleted (FK on delete set null) — the
+  // chat keeps the historical row but renders as "Deleted user".
+  author_id: string | null
+  body: string
+  created_at: string
+  // Set when the author edits the message; null if never edited. Drives the
+  // "(edited)" marker in the chat UI.
+  edited_at: string | null
+}
+
+// Chat row joined with the author's profile so the UI doesn't need a second
+// query per message. `author` is null when the user account was deleted.
+export type ClubMessageWithAuthor = ClubMessage & {
+  author: Pick<Profile, 'id' | 'full_name'> | null
+}
+
+// ── Chat message reports (safety / moderation) ───────────────────────────────
+// Schema: supabase/schema_v23.sql.
+//   pending  → flagged, awaiting review
+//   resolved → reviewer kept the message (report dismissed)
+//   removed  → reviewer deleted the offending message
+export type MessageReportStatus = 'pending' | 'resolved' | 'removed'
+
+export type MessageReport = {
+  id: string
+  message_id: string
+  organization_id: string
+  reported_by: string | null
+  reason: string
+  status: MessageReportStatus
+  created_at: string
+  reviewed_by: string | null
+  reviewed_at: string | null
+}
+
+// Report enriched for the moderation queue: the reported message (body +
+// author name), the club name, and the reporter's name. `message` is null if
+// the underlying message was already deleted.
+export type MessageReportFeedItem = MessageReport & {
+  message: { id: string; body: string; author_name: string | null } | null
+  organization: Pick<Organization, 'id' | 'name'>
+  reporter: Pick<Profile, 'id' | 'full_name'> | null
 }

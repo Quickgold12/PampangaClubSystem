@@ -22,8 +22,10 @@ import {
   countUnreadForUser,
   listFeedForUser,
 } from '@/services/announcement.service'
+import { countPendingMessageReports } from '@/services/chat.service'
 import {
   getPendingForReviewer,
+  listAdviserClubs,
   listOfficerClubs,
 } from '@/services/clubs.service'
 import { listUpcomingForUser } from '@/services/event.service'
@@ -43,7 +45,10 @@ import {
 } from 'react-native'
 
 type Stats = {
-  clubsJoined: number | null
+  // Count of upcoming events across the user's clubs. Replaced the old
+  // "Clubs Joined" tile — that one always showed 0 for advisers (adviser
+  // isn't a membership) and was redundant with the Clubs tab anyway.
+  upcomingEvents: number | null
   pendingRequests: number | null
   // Total announcements newer than the user's last_read across all their
   // clubs. Acts as the in-app "notification badge" — see the Recent feed
@@ -59,6 +64,7 @@ type ApprovalCounts = {
   joinRequests: number
   announcements: number
   reports: number
+  messageReports: number
 }
 
 export default function HomeDashboard() {
@@ -67,7 +73,7 @@ export default function HomeDashboard() {
   const { user, profile } = useAuth()
 
   const [stats, setStats] = useState<Stats>({
-    clubsJoined: null,
+    upcomingEvents: null,
     pendingRequests: null,
     unreadAnnouncements: null,
   })
@@ -78,10 +84,15 @@ export default function HomeDashboard() {
     joinRequests: 0,
     announcements: 0,
     reports: 0,
+    messageReports: 0,
   })
   // Clubs where the user holds an officer membership — drives the "Your
   // Officer Clubs" horizontal strip below the Quick Actions.
   const [officerClubs, setOfficerClubs] = useState<Array<Pick<Organization, 'id' | 'name'>>>([])
+  // Clubs where the user is the named adviser or faculty coordinator —
+  // drives the "Clubs You Advise" strip on the dashboard so an adviser
+  // can jump directly into their clubs.
+  const [adviserClubs, setAdviserClubs] = useState<Array<Pick<Organization, 'id' | 'name'>>>([])
   // The 5 most recent announcements across the user's clubs — feed strip.
   const [recentFeed, setRecentFeed] = useState<AnnouncementFeedItem[]>([])
   // The next few upcoming events across the user's clubs — events widget.
@@ -102,20 +113,17 @@ export default function HomeDashboard() {
     // All queries fire in parallel — bigger batch than before, but each is
     // either a HEAD count or a tiny join. The dashboard stays snappy.
     const [
-      clubsRes,
       requestsRes,
       unreadRes,
       feedRes,
       joinReqRes,
       pendAnnRes,
       pendRepRes,
+      msgReportsRes,
       officerClubsRes,
       upcomingEventsRes,
+      adviserClubsRes,
     ] = await Promise.all([
-      supabase
-        .from('memberships')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', user.id),
       supabase
         .from('join_requests')
         .select('id', { count: 'exact', head: true })
@@ -130,13 +138,20 @@ export default function HomeDashboard() {
       getPendingForReviewer(user.id),
       countPendingAnnouncementsForReviewer(user.id),
       countPendingReportsForReviewer(user.id),
+      // Reported chat messages — officers + advisers can review.
+      countPendingMessageReports(user.id),
       // Officer clubs strip data.
       listOfficerClubs(user.id),
       // Upcoming events across the user's clubs.
       listUpcomingForUser(user.id, 4),
+      // Clubs the user advises (named on the org as adviser/faculty).
+      listAdviserClubs(user.id),
     ])
     setStats({
-      clubsJoined: clubsRes.error ? null : clubsRes.count ?? 0,
+      // listUpcomingForUser is capped at 4 above, so this is a "next-few"
+      // counter rather than an absolute total — which is exactly what an
+      // at-a-glance tile should show.
+      upcomingEvents: upcomingEventsRes.error ? null : upcomingEventsRes.data?.length ?? 0,
       pendingRequests: requestsRes.error ? null : requestsRes.count ?? 0,
       unreadAnnouncements: unreadRes.error ? null : unreadRes.data ?? 0,
     })
@@ -144,10 +159,12 @@ export default function HomeDashboard() {
       joinRequests: joinReqRes.data?.length ?? 0,
       announcements: pendAnnRes.data ?? 0,
       reports: pendRepRes.data ?? 0,
+      messageReports: msgReportsRes.data ?? 0,
     })
     if (feedRes.data) setRecentFeed(feedRes.data)
     if (officerClubsRes.data) setOfficerClubs(officerClubsRes.data)
     if (upcomingEventsRes.data) setUpcomingEvents(upcomingEventsRes.data)
+    if (adviserClubsRes.data) setAdviserClubs(adviserClubsRes.data)
   }, [user])
 
   useEffect(() => {
@@ -184,7 +201,7 @@ export default function HomeDashboard() {
       {/* Three stats now — Clubs / Pending / Unread Announcements. The third
           tile acts as the in-app "notification badge" for new posts. */}
       <View style={styles.statRow}>
-        <StatTile label="Clubs Joined" value={stats.clubsJoined} />
+        <StatTile label="Upcoming" value={stats.upcomingEvents} />
         <StatTile label="Pending" value={stats.pendingRequests} />
         <StatTile label="New Posts" value={stats.unreadAnnouncements} />
       </View>
@@ -192,7 +209,10 @@ export default function HomeDashboard() {
       {/* ── Pending Approvals card pack (officer / adviser / faculty) ──
           One card per non-zero queue. Whole section is hidden when every
           count is zero, so regular students never see it. */}
-      {(approvals.joinRequests + approvals.announcements + approvals.reports) > 0 && (
+      {(approvals.joinRequests +
+        approvals.announcements +
+        approvals.reports +
+        approvals.messageReports) > 0 && (
         <>
           <Text style={styles.sectionLabel}>Pending Approvals</Text>
           <View style={styles.approvalRow}>
@@ -217,7 +237,49 @@ export default function HomeDashboard() {
                 onPress={() => router.push('/moderation/reports' as never)}
               />
             )}
+            {approvals.messageReports > 0 && (
+              <ApprovalCard
+                count={approvals.messageReports}
+                label="Reported Messages"
+                onPress={() => router.push('/moderation/messages' as never)}
+              />
+            )}
           </View>
+        </>
+      )}
+
+      {/* ── Clubs You Advise strip (advisers / faculty coordinators) ──
+          Same shape as the Officer Clubs strip below but for the user's
+          named-adviser clubs. Rendered ABOVE the officer strip so an
+          adviser sees their own clubs first. */}
+      {adviserClubs.length > 0 && (
+        <>
+          <Text style={styles.sectionLabel}>Clubs You Advise</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.officerStripContent}
+            style={styles.officerStrip}
+          >
+            {adviserClubs.map((c) => (
+              <Pressable
+                key={c.id}
+                onPress={() => router.push(`/club/${c.id}` as never)}
+                style={({ pressed }) => [
+                  styles.adviserChip,
+                  pressed && styles.actionRowPressed,
+                ]}
+                accessibilityRole="button"
+                accessibilityLabel={`Open ${c.name}`}
+              >
+                {/* No "ADVISER OF" label — the section header already says
+                    "Clubs You Advise". Just the name keeps the chip compact. */}
+                <Text style={styles.adviserChipName} numberOfLines={1}>
+                  {c.name}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
         </>
       )}
 
@@ -245,8 +307,7 @@ export default function HomeDashboard() {
                 accessibilityRole="button"
                 accessibilityLabel={`Open ${c.name}`}
               >
-                <Text style={styles.officerChipLabel}>OFFICER OF</Text>
-                <Text style={styles.officerChipName} numberOfLines={2}>
+                <Text style={styles.officerChipName} numberOfLines={1}>
                   {c.name}
                 </Text>
               </Pressable>
@@ -578,9 +639,9 @@ const makeStyles = (t: ReturnType<typeof useTheme>) =>
       textTransform: 'uppercase',
       marginTop: t.space.xs,
     },
-    // ── Officer Clubs horizontal strip ────────────────────────────────────
+    // ── Horizontal chip strips (used by both Adviser-Of and Officer-Of) ───
     officerStrip: {
-      marginBottom: t.space.xl,
+      marginBottom: t.space.sm,
     },
     // Edge padding lives on the contentContainer so the first/last chips
     // align with the rest of the page padding.
@@ -588,24 +649,42 @@ const makeStyles = (t: ReturnType<typeof useTheme>) =>
       gap: t.space.sm,
       paddingRight: t.space.xl,
     },
-    officerChip: {
-      width: 160,
+    // Mini club card — same look as the Clubs list cards (white surface,
+    // lg radius, soft shadow, warm border) but sized for a horizontal strip.
+    // Adviser gets a brand-coloured border so the role still reads at a
+    // glance; officer keeps the neutral card border.
+    adviserChip: {
+      width: 180,
+      alignSelf: 'flex-start',
       backgroundColor: t.color.surface,
       borderRadius: t.radius.lg,
-      padding: t.space.md,
+      paddingHorizontal: t.space.md,
+      paddingVertical: t.space.sm,
+      borderWidth: 1,
+      borderColor: t.color.brand,
+      ...t.shadow.card,
+    },
+    adviserChipName: {
+      fontSize: t.font.size.bodySm,
+      lineHeight: t.font.lineHeight.bodySm,
+      fontWeight: t.font.weight.bold,
+      color: t.color.text,
+    },
+    officerChip: {
+      width: 180,
+      alignSelf: 'flex-start',
+      backgroundColor: t.color.surface,
+      borderRadius: t.radius.lg,
+      paddingHorizontal: t.space.md,
+      paddingVertical: t.space.sm,
       borderWidth: 1,
       borderColor: t.color.border,
-    },
-    officerChipLabel: {
-      fontSize: t.font.size.caption,
-      color: t.color.accent,
-      fontWeight: t.font.weight.semibold,
-      letterSpacing: t.font.tracking.caps,
-      marginBottom: t.space.xs,
+      ...t.shadow.card,
     },
     officerChipName: {
-      fontSize: t.font.size.body,
-      fontWeight: t.font.weight.semibold,
+      fontSize: t.font.size.bodySm,
+      lineHeight: t.font.lineHeight.bodySm,
+      fontWeight: t.font.weight.bold,
       color: t.color.text,
     },
     feedTitle: {

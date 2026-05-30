@@ -6,8 +6,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 import Logo from '@/components/common/Logo'
 import { useTheme } from '@/hooks/use-theme'
+import { router } from 'expo-router'
 import React, { useMemo } from 'react'
-import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native'
 
 export default function AboutScreen() {
   const theme = useTheme()
@@ -53,6 +54,27 @@ export default function AboutScreen() {
           users in your school can see it, and database rules limit what each
           role can read and write.
         </Text>
+      </Section>
+
+      <Section title="Legal">
+        <Pressable
+          onPress={() => router.push('/legal/privacy' as never)}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+          accessibilityRole="link"
+          accessibilityLabel="Read the Privacy Policy"
+        >
+          <Text style={styles.linkText}>Privacy Policy</Text>
+          <Text style={styles.linkChevron}>›</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push('/legal/terms' as never)}
+          style={({ pressed }) => [styles.linkRow, pressed && styles.linkRowPressed]}
+          accessibilityRole="link"
+          accessibilityLabel="Read the Terms of Service"
+        >
+          <Text style={styles.linkText}>Terms of Service</Text>
+          <Text style={styles.linkChevron}>›</Text>
+        </Pressable>
       </Section>
 
       <View style={styles.footer}>
@@ -158,6 +180,25 @@ const makeStyles = (t: ReturnType<typeof useTheme>) =>
       fontSize: t.font.size.bodySm,
       lineHeight: t.font.lineHeight.body,
       color: t.color.text,
+    },
+    // Tappable rows in the Legal section — link text + chevron.
+    linkRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingVertical: t.space.sm,
+    },
+    linkRowPressed: {
+      opacity: 0.6,
+    },
+    linkText: {
+      fontSize: t.font.size.body,
+      color: t.color.brandPressed,
+      fontWeight: t.font.weight.semibold,
+    },
+    linkChevron: {
+      fontSize: t.font.size.lead,
+      color: t.color.textSubtle,
     },
     footer: {
       alignItems: 'center',

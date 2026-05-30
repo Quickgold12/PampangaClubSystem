@@ -24,6 +24,7 @@
 
 import { supabase } from '@/services/supabase'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+import Constants from 'expo-constants'
 import { Platform } from 'react-native'
 
 // Type-only import (erased at compile time — does NOT pull the module in at
@@ -73,6 +74,47 @@ export const requestPermission = async (): Promise<boolean> => {
 
   const request = await Notifications.requestPermissionsAsync()
   return request.granted
+}
+
+// ── Remote push: register this device's Expo push token ─────────────────────
+// Fetches the Expo push token for this device and upserts it into push_tokens
+// (schema_v24) so the notify-on-message Edge Function can deliver chat pushes
+// when the app is closed. Safe to call on every login — upsert keyed on token.
+//
+// Requires an EAS projectId (added by `eas init`, surfaced via expo-constants).
+// If it's missing we log and bail rather than throw, so the app still runs and
+// push lights up automatically once EAS is configured. Caller must already
+// hold notification permission (requestPermission()).
+export const registerPushToken = async (userId: string): Promise<void> => {
+  const Notifications = await loadNotifications()
+
+  const settings = await Notifications.getPermissionsAsync()
+  if (!settings.granted) return
+
+  // projectId lives in expo-constants under either key depending on SDK/build.
+  const projectId =
+    (Constants?.expoConfig as any)?.extra?.eas?.projectId ??
+    (Constants as any)?.easConfig?.projectId
+  if (!projectId) {
+    console.log('[push] No EAS projectId found — run `eas init` to enable remote push.')
+    return
+  }
+
+  try {
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId })
+    if (!token) return
+    await supabase.from('push_tokens').upsert(
+      {
+        token,
+        user_id: userId,
+        platform: Platform.OS,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'token' }
+    )
+  } catch (e) {
+    console.log('[push] Failed to register push token:', e)
+  }
 }
 
 // Fire an immediate local notification (trigger: null = now). Fire-and-forget

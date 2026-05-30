@@ -33,33 +33,22 @@ export const signUp = async ({
   fullName,
   role,
 }: SignUpParams): Promise<AuthResult> => {
-  // Step 1: Create auth account
-  const { data, error: signUpError } = await supabase.auth.signUp({
+  // Single call: full_name + role go in as Supabase Auth user_metadata. A
+  // Postgres trigger on auth.users INSERT (handle_new_user, schema_v17.sql)
+  // reads those values, cleans up any email-orphan public.users row, and
+  // creates the matching profile row server-side. Doing this in the trigger
+  // (rather than a second client INSERT) is what prevents the recurring
+  // "duplicate key violates users_email_key" error — the trigger runs with
+  // SECURITY DEFINER and can clean up orphans the client can't touch.
+  const { error } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      data: { full_name: fullName, role },
+    },
   })
 
-  if (signUpError) return { success: false, error: signUpError.message }
-  if (!data.user) return { success: false, error: 'Signup failed. Please try again.' }
-
-  // Step 2: Create user profile
-  const { error: profileError } = await supabase.from('users').insert({
-    id: data.user.id,
-    full_name: fullName,
-    email,
-    role,
-  })
-
-  if (profileError) {
-    // TEMP (debugging): surface the actual Postgres error so we can see what
-    // step 2 is really failing on (missing table? RLS policy? bad column?).
-    // Revert to the friendly message once signup works end-to-end.
-    return {
-      success: false,
-      error: `Profile setup failed: ${profileError.message} (code: ${profileError.code ?? 'n/a'})`,
-    }
-  }
-
+  if (error) return { success: false, error: error.message }
   return { success: true }
 }
 
@@ -103,6 +92,54 @@ export const fetchUserProfile = async (userId: string) => {
 
   if (error) return null
   return data
+}
+
+// ── Public profile view (any signed-in user can view another member) ────────
+// Returns the user's basic profile plus the clubs they belong to, with the
+// in-club role. RLS makes users + memberships + organizations readable to all
+// authenticated users (schema_v7 / schema.sql), so this is safe to expose.
+// Email is intentionally OMITTED — a public profile shouldn't leak it.
+export type PublicProfile = {
+  id: string
+  full_name: string
+  role: string
+  avatar_url: string | null
+  clubs: { id: string; name: string; role_in_club: 'member' | 'officer' }[]
+}
+
+export const fetchPublicProfile = async (
+  userId: string
+): Promise<PublicProfile | null> => {
+  const [profileRes, membershipsRes] = await Promise.all([
+    supabase.from('users').select('id, full_name, role, avatar_url').eq('id', userId).single(),
+    supabase
+      .from('memberships')
+      .select('role_in_club, organizations(id, name)')
+      .eq('user_id', userId),
+  ])
+
+  if (profileRes.error || !profileRes.data) return null
+
+  const clubs = (membershipsRes.data ?? [])
+    .map((row: any) => {
+      const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations
+      if (!org) return null
+      return {
+        id: org.id,
+        name: org.name,
+        role_in_club: row.role_in_club as 'member' | 'officer',
+      }
+    })
+    .filter((c): c is { id: string; name: string; role_in_club: 'member' | 'officer' } => c !== null)
+    .sort((a, b) => a.name.localeCompare(b.name))
+
+  return {
+    id: profileRes.data.id,
+    full_name: profileRes.data.full_name,
+    role: profileRes.data.role,
+    avatar_url: profileRes.data.avatar_url ?? null,
+    clubs,
+  }
 }
 
 // Update the user's own profile row. Editable: full_name + avatar_url. Email is

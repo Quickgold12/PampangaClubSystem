@@ -207,21 +207,28 @@ export default function ClubDetailScreen() {
             <Text style={styles.bodyMuted}>No members yet — be the first to join.</Text>
           ) : (
             club.members.map((m) => (
-              <View key={m.id} style={styles.memberRow}>
+              <Pressable
+                key={m.id}
+                onPress={() => router.push(`/profile/${m.id}` as never)}
+                style={({ pressed }) => [styles.memberRow, pressed && styles.memberRowPressed]}
+                accessibilityRole="button"
+                accessibilityLabel={`View ${m.full_name}'s profile`}
+              >
                 <Text style={styles.memberName}>{m.full_name}</Text>
                 {m.role_in_club === 'officer' && (
                   <View style={styles.officerPill}>
                     <Text style={styles.officerPillText}>Officer</Text>
                   </View>
                 )}
-              </View>
+              </Pressable>
             ))
           )}
         </Section>
 
-        {/* Member-visible action row — Announcements + Finances + Reports.
-            Read-only for regular members; editable for officers/advisers.
-            The grid wraps to two-per-row on narrow phones. */}
+        {/* Member-visible action row — Announcements + Finances + Reports +
+            Events. Read-only for regular members; editable for officers /
+            advisers. (Chat lives in its own tab now — separate, more visible
+            entry point matching the Messenger pattern users expect.) */}
         {(isAlreadyMember || isReviewerForThisClub) && (
           <View style={styles.actionGrid}>
             <ActionButton
@@ -240,6 +247,8 @@ export default function ClubDetailScreen() {
               label="Events"
               onPress={() => router.push(`/club/${club.id}/events` as never)}
             />
+            {/* Members check in to events by scanning the officer's QR. */}
+            <ActionButton label="Scan to Check In" onPress={() => router.push('/scan' as never)} />
           </View>
         )}
 
@@ -257,6 +266,16 @@ export default function ClubDetailScreen() {
             <ActionButton
               label="Record Attendance"
               onPress={() => router.push(`/club/${club.id}/record-attendance` as never)}
+            />
+            {/* Open a QR session members scan to mark themselves present. */}
+            <ActionButton
+              label="QR Check-In"
+              onPress={() => router.push(`/club/${club.id}/checkin` as never)}
+            />
+            {/* Visual attendance + membership insights (officer/adviser only). */}
+            <ActionButton
+              label="Analytics"
+              onPress={() => router.push(`/club/${club.id}/analytics` as never)}
             />
           </View>
         )}
@@ -419,7 +438,12 @@ const makeStyles = (t: ReturnType<typeof useTheme>) =>
       flexDirection: 'row',
       alignItems: 'center',
       paddingVertical: t.space.sm,
+      paddingHorizontal: t.space.sm,
+      borderRadius: t.radius.sm,
       gap: t.space.sm,
+    },
+    memberRowPressed: {
+      backgroundColor: t.color.surfaceMuted,
     },
     memberName: {
       flex: 1,

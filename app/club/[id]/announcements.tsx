@@ -39,6 +39,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native'
 
@@ -52,6 +53,7 @@ export default function AnnouncementsScreen() {
   const [posts, setPosts] = useState<AnnouncementWithAuthor[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+  const [query, setQuery] = useState('') // search box — filters by title/content
 
   // Composer state — used for both posting NEW and editing EXISTING posts.
   // editingId === null → composer creates a new post.
@@ -106,6 +108,18 @@ export default function AnnouncementsScreen() {
   const canPostDirect = isAdviser || isOfficer
   const canSubmit = isMember && !canPostDirect // members who aren't officers/advisers
   const isModerator = isAdviser
+
+  // Client-side search — case-insensitive match against title + content. The
+  // list per club is small, so filtering in memory beats a round-trip per
+  // keystroke.
+  const filteredPosts = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return posts
+    return posts.filter(
+      (p) =>
+        p.title.toLowerCase().includes(q) || p.content.toLowerCase().includes(q)
+    )
+  }, [posts, query])
 
   // Reset the composer back to "create new" mode.
   const resetComposer = () => {
@@ -326,19 +340,36 @@ export default function AnnouncementsScreen() {
           </View>
         )}
 
+        {/* Search box — only worth showing once there are posts to filter. */}
+        {posts.length > 0 && (
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search announcements…"
+            placeholderTextColor={theme.color.textSubtle}
+            value={query}
+            onChangeText={setQuery}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+            accessibilityLabel="Search announcements"
+          />
+        )}
+
         {/* Post list. RLS already filters what the caller can see; the only
             per-row UI logic here is the status pill (for non-approved rows)
             and the action chips at the bottom. */}
-        {posts.length === 0 ? (
+        {filteredPosts.length === 0 ? (
           <View style={styles.empty}>
             <Text style={styles.emptyText}>
-              {canPostDirect || canSubmit
+              {query.trim()
+                ? `No announcements match "${query.trim()}".`
+                : canPostDirect || canSubmit
                 ? 'No announcements yet — be the first to post.'
                 : 'No announcements yet. Check back later.'}
             </Text>
           </View>
         ) : (
-          posts.map((p) => {
+          filteredPosts.map((p) => {
             const isAuthor = p.posted_by === user?.id
             // Delete chip shows only when the caller can actually delete the
             // row per RLS: author OR adviser/faculty. Officer-vs-officer
@@ -489,6 +520,17 @@ const makeStyles = (t: ReturnType<typeof useTheme>) =>
       borderWidth: 1,
       borderColor: t.color.border,
       ...t.shadow.card,
+    },
+    searchInput: {
+      backgroundColor: t.color.inputBg,
+      borderWidth: 1,
+      borderColor: t.color.border,
+      borderRadius: t.radius.md,
+      paddingHorizontal: t.space.md,
+      paddingVertical: t.space.sm,
+      fontSize: t.font.size.body,
+      color: t.color.text,
+      marginBottom: t.space.lg,
     },
     cardLabel: {
       fontSize: t.font.size.caption,

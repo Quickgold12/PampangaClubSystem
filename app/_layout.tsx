@@ -63,6 +63,9 @@ function RootLayoutNav() {
       <Stack.Screen name="club/[id]/dues" options={{ headerShown: true, headerBackTitle: 'Back' }} />
       <Stack.Screen name="club/[id]/budget" options={{ headerShown: true, headerBackTitle: 'Back' }} />
       <Stack.Screen name="club/[id]/events" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      <Stack.Screen name="club/[id]/chat" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      <Stack.Screen name="club/[id]/checkin" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      <Stack.Screen name="club/[id]/analytics" options={{ headerShown: true, headerBackTitle: 'Back' }} />
       {/* Faculty coordinator console — school-wide oversight (gated by role
           inside each screen). */}
       <Stack.Screen name="faculty/index" options={{ headerShown: true, headerBackTitle: 'Back' }} />
@@ -71,6 +74,14 @@ function RootLayoutNav() {
           home dashboard Pending Approvals card pack. */}
       <Stack.Screen name="moderation/announcements" options={{ headerShown: true, headerBackTitle: 'Back' }} />
       <Stack.Screen name="moderation/reports" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      <Stack.Screen name="moderation/messages" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      {/* Public member profile (tap a name in a members list or chat). */}
+      <Stack.Screen name="profile/[id]" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      {/* Legal documents, linked from the About screen. */}
+      <Stack.Screen name="legal/privacy" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      <Stack.Screen name="legal/terms" options={{ headerShown: true, headerBackTitle: 'Back' }} />
+      {/* QR attendance: member scanner (officer QR generator is club/[id]/checkin). */}
+      <Stack.Screen name="scan" options={{ headerShown: true, headerBackTitle: 'Back' }} />
     </Stack>
   )
 }

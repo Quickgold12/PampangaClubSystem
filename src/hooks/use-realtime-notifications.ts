@@ -16,6 +16,7 @@
 import { useAuth } from '@/context/AuthContext'
 import {
   configureNotificationHandler,
+  registerPushToken,
   requestPermission,
   subscribeToUserNotifications,
 } from '@/services/notifications.service'
@@ -46,6 +47,9 @@ export function useRealtimeNotifications(): void {
     configureNotificationHandler()
     requestPermission().then((granted) => {
       if (cancelled || !granted) return
+      // Register this device for remote push (chat notifications when the app
+      // is closed). Fire-and-forget — no-op if EAS isn't configured yet.
+      void registerPushToken(user.id)
       unsubscribe = subscribeToUserNotifications(user.id)
     })
 

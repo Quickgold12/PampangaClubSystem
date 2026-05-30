@@ -211,3 +211,152 @@ export const getClubStats = async (orgId: string): Promise<Result<ClubStats>> =>
     attendanceRate,
   })
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// QR check-in (schema_v27)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// One open check-in session. The officer screen renders `id` as a QR code.
+export type CheckinSession = {
+  id: string
+  organization_id: string
+  event_name: string
+  event_date: string
+  expires_at: string
+}
+
+// ── Officer: open a check-in session for an event ───────────────────────────
+// RLS limits inserts to officers/advisers of the club. Returns the new session
+// (its id becomes the QR payload). event_date defaults to today server-side.
+export const createCheckinSession = async (
+  orgId: string,
+  eventName: string,
+  createdBy: string
+): Promise<Result<CheckinSession>> => {
+  const name = eventName.trim()
+  if (!name) return fail('Give the event a name first.')
+  if (name.length > 120) return fail('Event name is too long.')
+
+  const { data, error } = await supabase
+    .from('checkin_sessions')
+    .insert({ organization_id: orgId, event_name: name, created_by: createdBy })
+    .select('id, organization_id, event_name, event_date, expires_at')
+    .single()
+
+  if (error) return fail(error.message)
+  return ok(data as CheckinSession)
+}
+
+// ── Officer: close a session early (deletes it; the QR stops working) ───────
+export const closeCheckinSession = async (sessionId: string): Promise<Result<true>> => {
+  const { error } = await supabase.from('checkin_sessions').delete().eq('id', sessionId)
+  if (error) return fail(error.message)
+  return ok(true)
+}
+
+// ── Officer: live count of who has checked in for this session's event ──────
+// Counts attendance rows matching the session's (org, event, date). Lets the
+// officer watch check-ins roll in on the QR screen.
+export const countCheckedIn = async (session: CheckinSession): Promise<Result<number>> => {
+  const { count, error } = await supabase
+    .from('attendance')
+    .select('id', { count: 'exact', head: true })
+    .eq('organization_id', session.organization_id)
+    .eq('event_name', session.event_name)
+    .eq('attended_date', session.event_date)
+  if (error) return fail(error.message)
+  return ok(count ?? 0)
+}
+
+// ── Member: check in by scanning a QR (session id) ──────────────────────────
+// Calls the SECURITY DEFINER check_in RPC, which validates the session +
+// membership and records attendance. Returns the event name on success.
+// The RPC raises "checkin:"-prefixed errors; we strip the prefix for display.
+export const checkInWithSession = async (sessionId: string): Promise<Result<string>> => {
+  const { data, error } = await supabase.rpc('check_in', { p_session_id: sessionId })
+  if (error) {
+    const marker = 'checkin:'
+    const i = error.message.indexOf(marker)
+    return fail(i === -1 ? error.message : error.message.slice(i + marker.length).trim())
+  }
+  return ok((data as string) ?? 'Event')
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Club analytics (officer/adviser dashboard)
+// ═══════════════════════════════════════════════════════════════════════════
+
+// A single labelled bar for the analytics charts.
+export type AnalyticsBar = { label: string; value: number }
+
+export type ClubAnalytics = {
+  stats: ClubStats
+  attendanceByEvent: AnalyticsBar[] // most recent events, oldest → newest
+  memberGrowth: AnalyticsBar[] // cumulative member count by month
+  topAttendees: { name: string; count: number }[] // top 5 most-active members
+}
+
+// How many bars to show in each chart (keeps small-screen labels readable).
+const MAX_ANALYTICS_BARS = 8
+
+// "2026-05-18" → "5/18"
+const eventLabel = (isoDate: string): string => {
+  const [, m, d] = isoDate.split('-')
+  return `${parseInt(m, 10)}/${parseInt(d, 10)}`
+}
+
+// ISO timestamp → "YYYY-MM" bucket key.
+const monthKey = (iso: string): string => iso.slice(0, 7)
+
+// "2026-05" → "5/26"
+const monthLabel = (key: string): string => {
+  const [y, m] = key.split('-')
+  return `${parseInt(m, 10)}/${y.slice(2)}`
+}
+
+// ── Aggregate everything the analytics screen needs ─────────────────────────
+// Composes the existing stats/events/per-member helpers plus one membership
+// query for the growth series. All run in parallel.
+export const getClubAnalytics = async (orgId: string): Promise<Result<ClubAnalytics>> => {
+  const [statsRes, eventsRes, perMemberRes, growthRes] = await Promise.all([
+    getClubStats(orgId),
+    listEvents(orgId),
+    summarisePerMember(orgId),
+    supabase.from('memberships').select('joined_at').eq('organization_id', orgId),
+  ])
+
+  if (statsRes.error || !statsRes.data) return fail(statsRes.error ?? 'Could not load stats.')
+  if (eventsRes.error) return fail(eventsRes.error)
+  if (perMemberRes.error) return fail(perMemberRes.error)
+  if (growthRes.error) return fail(growthRes.error.message)
+
+  // Attendance per event — listEvents is newest-first; take the most recent N
+  // and reverse so the chart reads left (older) → right (newer).
+  const attendanceByEvent: AnalyticsBar[] = (eventsRes.data ?? [])
+    .slice(0, MAX_ANALYTICS_BARS)
+    .reverse()
+    .map((e) => ({ label: eventLabel(e.attended_date), value: e.attendee_count }))
+
+  // Member growth — bucket joins by month, accumulate across ALL months, then
+  // keep the most recent N bars (so the running total still reflects earlier
+  // months trimmed off the front of the chart).
+  const byMonth = new Map<string, number>()
+  for (const row of (growthRes.data ?? []) as { joined_at: string }[]) {
+    const key = monthKey(row.joined_at)
+    byMonth.set(key, (byMonth.get(key) ?? 0) + 1)
+  }
+  let running = 0
+  const cumulativeAll: AnalyticsBar[] = Array.from(byMonth.keys())
+    .sort()
+    .map((m) => {
+      running += byMonth.get(m) ?? 0
+      return { label: monthLabel(m), value: running }
+    })
+  const memberGrowth = cumulativeAll.slice(-MAX_ANALYTICS_BARS)
+
+  const topAttendees = (perMemberRes.data ?? [])
+    .slice(0, 5)
+    .map((m) => ({ name: m.full_name, count: m.attended_count }))
+
+  return ok({ stats: statsRes.data, attendanceByEvent, memberGrowth, topAttendees })
+}
